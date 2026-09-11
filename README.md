@@ -4,6 +4,9 @@ An automated n8n workflow that functions as a smart job-hunting assistant. It ac
 
 <img width="1090" height="527" alt="image" src="https://github.com/user-attachments/assets/bef12bde-2705-4a63-b39a-e7776950fe1e" />
 
+<img width="1865" height="650" alt="image" src="https://github.com/user-attachments/assets/9721056a-6cf4-4bd0-a301-ef81a651547f" />
+
+<img width="1857" height="647" alt="image" src="https://github.com/user-attachments/assets/dbd5710d-7c8e-4f2d-8d56-5d5ec39680a5" />
 
 
 ## Features
