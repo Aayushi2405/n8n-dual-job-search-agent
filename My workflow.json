@@ -1,0 +1,339 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "allowFileUploads": true
+        }
+      },
+      "id": "83b2efd1-d3fc-435d-bc0c-b00a5c0f3c9c",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "632d2624-e4ac-4838-9e56-824592402ca4"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-file",
+              "leftValue": "={{ $json.files ? $json.files.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "79552f7f-4161-4747-8751-ac5154d7185d",
+      "name": "Resume Uploaded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data0",
+        "options": {}
+      },
+      "id": "d94d6fca-61c0-41ea-8c10-554e3ba832c7",
+      "name": "Extract Resume Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -224,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "q1",
+              "name": "query",
+              "type": "string",
+              "value": "=The following text is the candidate's resume. Infer the most relevant job role(s) from their skills and experience, then find remote jobs that match.\n\nRESUME:\n{{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "efa484b6-df49-4770-9408-482cdc280308",
+      "name": "Build Resume Query",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an AI Agent that searches remote job listings and returns them as structured data.\n\nThe user input may be either (a) a plain job-search request (e.g. \"find me frontend developer jobs\"), or (b) the text of a candidate's resume. If it is a resume, infer the 1-2 most relevant job roles/titles from the candidate's skills and experience, and use those as the search terms.\n\nYou have TWO job-search tools. Use BOTH for every request and combine their results:\n1. Find Jobs Tool (Remotive API) — returns remote job listings from the Remotive job board.\n2. Career Page Search (Firecrawl) — performs a web search to find job openings posted directly on company career pages/websites. Use it to discover jobs beyond the Remotive board. Bias the search toward direct company career pages by including terms like \"careers\", \"jobs\", \"hiring\" and site filters such as \"site:greenhouse.io\", \"site:lever.co\", or \"site:jobs.ashbyhq.com\", rather than job aggregators.\n\nCall both tools for the request (or the inferred roles), then merge all results into a single JSON object matching the required schema. De-duplicate jobs that clearly appear from both sources (same title + company).\n\nYou must return TWO lists:\n1. \"jobs\" — the main matches: jobs for the specific role the user asked for (or the roles inferred from the resume). Populate this from BOTH tools.\n2. \"otherJobs\" — an \"Other Jobs\" section containing jobs in the SAME domain/field as the requested role that are posted directly on OTHER companies' career-page websites (i.e. company career sites, not the Remotive job board). These are additional openings in the same domain discovered by crawling/searching other websites' career pages. Source otherJobs EXCLUSIVELY from the Career Page Search (Firecrawl) tool — run one or more searches to find jobs in the same domain/field on company career pages across different websites (e.g. site:greenhouse.io, site:lever.co, site:jobs.ashbyhq.com, or companies' own /careers pages). Every entry in otherJobs MUST have a link pointing to a company career-page website, NOT to remotive.com. Do NOT put Remotive job-board results in otherJobs (those belong in \"jobs\"). Do NOT duplicate an entry that already appears in \"jobs\" (same title + company).\n\nCRITICAL GROUNDING RULES (never break these):\n- Only include jobs that were actually returned by one of the tools (Find Jobs Tool or Career Page Search). NEVER invent, guess, fabricate, or add jobs from your own knowledge.\n- Every title, company, link, and country MUST come verbatim from a tool response. Do not modify or make up URLs — copy the exact link from the tool result.\n- If both tools return no matching jobs, return an empty \"jobs\" array. Do not fill it with made-up entries.\n- Do not invent salary figures. Only report a salary if the tool result contains one; otherwise use \"Not specified\".\n\nRules:\n- Return an object with a \"jobs\" array. Each element has: title, company, country, salary, link, summary.\n- country: the country where the job is based. Work it out from any location signal in the tool result — the listing's candidate location/region field, the city/state named in the title or description, or the company's headquarters country. Only use \"Remote/Worldwide\" when the listing truly states no country at all (e.g. \"Worldwide\" or \"Fully remote, any location\"). Do not default to \"Remote/Worldwide\" out of convenience.\n- salary: look for a salary or pay range ANYWHERE in the tool result for this job — a dedicated salary field, or an amount mentioned in the title, summary, or description text (e.g. \"$120k-$150k\", \"₹18 LPA\", \"€60,000\"). If you find one, report it; only use \"Not specified\" when no pay figure appears anywhere in the result. Express the salary in the local currency of the job's country: for jobs based in India show INR (e.g. \"₹12,00,000/year\"); for other countries use that country's currency (USD for the US, EUR for the Eurozone, GBP for the UK, etc.). Convert to the local currency when the listing states a different one, and include the currency symbol or code. Never invent a salary that is not in the tool result.\n- link: prefer the direct company career-page / application URL (e.g. the company's own site, Greenhouse, Lever, Workday, Ashby). Avoid aggregator redirect links (e.g. Indeed \"/rc/clk\" tracking URLs) when the tool result also provides the underlying direct URL. Only fall back to an aggregator link when it is the only URL available. Copy the URL verbatim from the tool result — never modify or fabricate it.\n- summary: a concise description of about 15 words.\n- If a field is missing, use \"Not specified\" rather than leaving it blank.\n- Do not add any commentary outside the structured output."
+        }
+      },
+      "id": "cb15cc3f-e1ac-4bc3-8652-9f9da2651f6c",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        224,
+        0
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {}
+      },
+      "id": "baaf2562-4583-4d14-9e33-f502b3ebf3b8",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        240
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "W94lpn4VwHLWKlt3",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Find Jobs Tool\n\nSearch for remote job openings based on the job role requested by the user.\n\nUse this tool whenever the user asks to find, search, or list jobs.",
+        "url": "https://remotive.com/api/remote-jobs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{ $fromAI(\"job_role\", \"The job role to search for\") }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "17fc912d-a3ce-4dee-83af-ef0fcb3b28f2",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        368,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "MapSearch",
+        "operation": "search",
+        "query": "={{ $fromAI(\"search_query\", \"A web search query to find job openings on company career pages, e.g. 'React developer careers site:greenhouse.io' or 'remote frontend developer jobs company careers'\") }}",
+        "limit": 10,
+        "requestOptions": {}
+      },
+      "id": "d6ba2e45-3960-4568-8300-cd0a04633cc6",
+      "name": "Career Page Search",
+      "type": "@mendable/n8n-nodes-firecrawl.firecrawlTool",
+      "typeVersion": 1,
+      "position": [
+        480,
+        416
+      ],
+      "credentials": {
+        "firecrawlApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"jobs\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"title\": {\n            \"type\": \"string\"\n          },\n          \"company\": {\n            \"type\": \"string\"\n          },\n          \"country\": {\n            \"type\": \"string\"\n          },\n          \"salary\": {\n            \"type\": \"string\"\n          },\n          \"link\": {\n            \"type\": \"string\"\n          },\n          \"summary\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"title\",\n          \"company\",\n          \"country\",\n          \"salary\",\n          \"link\",\n          \"summary\"\n        ]\n      }\n    },\n    \"otherJobs\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"title\": {\n            \"type\": \"string\"\n          },\n          \"company\": {\n            \"type\": \"string\"\n          },\n          \"country\": {\n            \"type\": \"string\"\n          },\n          \"salary\": {\n            \"type\": \"string\"\n          },\n          \"link\": {\n            \"type\": \"string\"\n          },\n          \"summary\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"title\",\n          \"company\",\n          \"country\",\n          \"salary\",\n          \"link\",\n          \"summary\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"jobs\",\n    \"otherJobs\"\n  ]\n}"
+      },
+      "id": "9d166faa-f4d5-4c6d-b676-d6f41157b21d",
+      "name": "Jobs Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        480,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "q2",
+              "name": "query",
+              "type": "string",
+              "value": "={{ $json.chatInput }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1d30e95-467b-4732-b436-f3cf8167c539",
+      "name": "Build Chat Query",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        384
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Resume Uploaded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Uploaded?": {
+      "main": [
+        [
+          {
+            "node": "Extract Resume Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Chat Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Resume Text": {
+      "main": [
+        [
+          {
+            "node": "Build Resume Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Resume Query": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Career Page Search": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jobs Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Chat Query": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c7b70e22-4104-4c82-ba4c-1ee8047b9d9b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "60c4cc15c05a5d2e3281bde7f7a890edffee556a92846da10e6e9070eaab67d9"
+  },
+  "nodeGroups": [],
+  "id": "EkEnCMmwpu6APca0",
+  "tags": []
+}
